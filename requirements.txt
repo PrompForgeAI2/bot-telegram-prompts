@@ -1,4 +1,2 @@
-fastapi
-uvicorn
-python-telegram-bot
-mercadopago
+python-telegram-bot==20.7
+mercadopago==2.2.1
