@@ -1,6 +1,5 @@
 import os
 import mercadopago
-from fastapi import FastAPI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -8,9 +7,6 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
-
-app = FastAPI()
-telegram_app = ApplicationBuilder().token(TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("💳 Comprar acesso - R$5,90", callback_data="comprar")]]
@@ -42,10 +38,14 @@ async def comprar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Copie o código PIX abaixo e pague:\n\n{pix_code}"
     )
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CallbackQueryHandler(comprar, pattern="comprar"))
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-@app.on_event("startup")
-async def startup():
-    await telegram_app.initialize()
-    await telegram_app.start()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(comprar, pattern="comprar"))
+
+    print("Bot rodando...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
