@@ -51,8 +51,11 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    chave_pix = "c5073f6f-214d-4db1-8323-472b64bd9be3"
+
     if query.data == "quero_acesso":
         keyboard = [
+            [InlineKeyboardButton("📋 Copiar Chave Pix", callback_data="copiar_pix")],
             [InlineKeyboardButton("✅ Já Paguei", callback_data="ja_paguei")]
         ]
 
@@ -61,11 +64,22 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
             "Valor: R$29,90\n\n"
-            "Chave Pix:\n"
-            "c5073f6f-214d-4db1-8323-472b64bd9be3\n\n"
-            "Após realizar o pagamento, clique em 'Já Paguei'.",
+            "Clique abaixo para copiar sua chave Pix:",
             reply_markup=reply_markup
         )
+
+    elif query.data == "copiar_pix":
+        await query.message.reply_text(
+            f"📋 Copie sua chave Pix abaixo:\n\n{chave_pix}"
+        )
+
+    elif query.data == "ja_paguei":
+        await query.edit_message_text(
+            "📩 Recebemos sua solicitação!\n\n"
+            "Seu pagamento será verificado.\n"
+            "Assim que confirmado, você receberá acesso."
+        )
+
 
     elif query.data == "ja_paguei":
         await query.edit_message_text(
