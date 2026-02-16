@@ -37,6 +37,19 @@ async def verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Você NÃO tem acesso.")
         
+        async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    if not usuario_tem_acesso(user_id):
+        await update.message.reply_text("❌ Você ainda não possui acesso ao sistema.")
+        return
+
+    await update.message.reply_text(
+        "📚 Bem-vindo ao Sistema IA Lucrativa\n\n"
+        "Em breve aqui estarão os módulos."
+    )
+
+        
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Bot funcionando 🚀")
 
@@ -45,6 +58,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("liberar", liberar))
     app.add_handler(CommandHandler("verificar", verificar))
+    app.add_handler(CommandHandler("menu", menu))
 
     app.run_polling()
 
