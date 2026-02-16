@@ -76,19 +76,23 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     elif query.data == "ja_paguei":
-        await query.edit_message_text(
-            "📩 Recebemos sua solicitação!\n\n"
-            "Seu pagamento será verificado.\n"
-            "Assim que confirmado, você receberá acesso."
-        )
+    user = query.from_user
 
-
-    elif query.data == "ja_paguei":
-        await query.edit_message_text(
-            "📩 Recebemos sua solicitação!\n\n"
-            "Seu pagamento será verificado.\n"
-            "Assim que confirmado, você receberá acesso."
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=(
+            "🚨 Novo pedido de verificação de pagamento!\n\n"
+            f"👤 Nome: {user.full_name}\n"
+            f"🆔 ID: {user.id}\n"
+            f"📎 Username: @{user.username if user.username else 'Não possui'}"
         )
+    )
+
+    await query.edit_message_text(
+        "📩 Recebemos sua solicitação!\n\n"
+        "Seu pagamento será verificado.\n"
+        "Assim que confirmado, você receberá acesso."
+    )
 
 
 
