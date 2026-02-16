@@ -7,6 +7,8 @@ from telegram.ext import CallbackQueryHandler
 
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
+ADMIN_ID = 5680777509  # coloque seu ID real aqui
+
 
 # === BANCO DE DADOS === #
 conn = sqlite3.connect("usuarios.db", check_same_thread=False)
@@ -69,30 +71,29 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "copiar_pix":
-    await query.message.reply_text(
-        f"📋 Toque e segure para copiar:\n\n`{chave_pix}`",
-        parse_mode="Markdown"
-    )
-
+        await query.message.reply_text(
+            f"📋 Toque e segure para copiar:\n\n`{chave_pix}`",
+            parse_mode="Markdown"
+        )
 
     elif query.data == "ja_paguei":
-    user = query.from_user
+        user = query.from_user
 
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            "🚨 Novo pedido de verificação de pagamento!\n\n"
-            f"👤 Nome: {user.full_name}\n"
-            f"🆔 ID: {user.id}\n"
-            f"📎 Username: @{user.username if user.username else 'Não possui'}"
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                "🚨 Novo pedido de verificação de pagamento!\n\n"
+                f"👤 Nome: {user.full_name}\n"
+                f"🆔 ID: {user.id}\n"
+                f"📎 Username: @{user.username if user.username else 'Não possui'}"
+            )
         )
-    )
 
-    await query.edit_message_text(
-        "📩 Recebemos sua solicitação!\n\n"
-        "Seu pagamento será verificado.\n"
-        "Assim que confirmado, você receberá acesso."
-    )
+        await query.edit_message_text(
+            "📩 Recebemos sua solicitação!\n\n"
+            "Seu pagamento será verificado.\n"
+            "Assim que confirmado, você receberá acesso."
+        )
 
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
