@@ -31,6 +31,10 @@ def usuario_tem_acesso(user_id):
 
 # ===== FUNÇÕES =====
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot funcionando 🚀")
+
+
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     salvar_usuario_pago(user_id)
@@ -56,3 +60,17 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 Bem-vindo ao Sistema IA Lucrativa\n\n"
         "Em breve aqui estarão os módulos."
     )
+
+
+# ===== INICIAR BOT =====
+
+print("🚀 Iniciando bot...")
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("liberar", liberar))
+app.add_handler(CommandHandler("verificar", verificar))
+app.add_handler(CommandHandler("menu", menu))
+
+app.run_polling()
