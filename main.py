@@ -94,12 +94,33 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Assim que confirmado, você receberá acesso."
     )
 
-
-
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    salvar_usuario_pago(user_id)
-    await update.message.reply_text("✅ Você foi salvo como pago.")
+
+    # Verifica se é o admin
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Você não tem permissão para usar este comando.")
+        return
+
+    # Verifica se foi enviado um ID
+    if not context.args:
+        await update.message.reply_text("⚠️ Use assim:\n/liberar ID_DO_USUARIO")
+        return
+
+    try:
+        user_id = int(context.args[0])
+        salvar_usuario_pago(user_id)
+
+        await update.message.reply_text(f"✅ Usuário {user_id} liberado com sucesso!")
+
+        # Notifica o usuário liberado
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="🎉 Seu pagamento foi confirmado!\n\nAgora você já pode acessar o sistema usando /menu"
+        )
+
+    except:
+        await update.message.reply_text("❌ ID inválido.")
+
 
 
 async def verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
