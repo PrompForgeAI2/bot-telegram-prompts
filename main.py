@@ -69,9 +69,11 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "copiar_pix":
-        await query.message.reply_text(
-            f"📋 Copie sua chave Pix abaixo:\n\n{chave_pix}"
-        )
+    await query.message.reply_text(
+        f"📋 Toque e segure para copiar:\n\n`{chave_pix}`",
+        parse_mode="Markdown"
+    )
+
 
     elif query.data == "ja_paguei":
         await query.edit_message_text(
