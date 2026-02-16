@@ -2,6 +2,9 @@ import sqlite3
 import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
+
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
@@ -32,7 +35,45 @@ def usuario_tem_acesso(user_id):
 # ===== FUNÇÕES =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot funcionando 🚀")
+    keyboard = [
+        [InlineKeyboardButton("🔓 Quero Acesso", callback_data="quero_acesso")]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "🚀 Sistema IA Lucrativa\n\n"
+        "Aprenda a gerar renda usando Inteligência Artificial.\n\n"
+        "Clique abaixo para desbloquear o acesso completo.",
+        reply_markup=reply_markup
+    )
+async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "quero_acesso":
+        keyboard = [
+            [InlineKeyboardButton("✅ Já Paguei", callback_data="ja_paguei")]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
+            "Valor: R$29,90\n\n"
+            "Chave Pix:\n"
+            "c5073f6f-214d-4db1-8323-472b64bd9be3\n\n"
+            "Após realizar o pagamento, clique em 'Já Paguei'.",
+            reply_markup=reply_markup
+        )
+
+    elif query.data == "ja_paguei":
+        await query.edit_message_text(
+            "📩 Recebemos sua solicitação!\n\n"
+            "Seu pagamento será verificado.\n"
+            "Assim que confirmado, você receberá acesso."
+        )
+
 
 
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,5 +113,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("liberar", liberar))
 app.add_handler(CommandHandler("verificar", verificar))
 app.add_handler(CommandHandler("menu", menu))
+app.add_handler(CallbackQueryHandler(botoes))
+
 
 app.run_polling()
