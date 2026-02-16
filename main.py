@@ -56,6 +56,3 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 Bem-vindo ao Sistema IA Lucrativa\n\n"
         "Em breve aqui estarão os módulos."
     )
-
-
-async def start(update:
