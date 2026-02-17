@@ -212,6 +212,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 print("🚀 Iniciando bot...")
 
+print("TOKEN carregado:", TOKEN)
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
