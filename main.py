@@ -206,17 +206,25 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === INICIAR BOT === #
 
-print("🚀 Iniciando bot...")
-print("TOKEN carregado:", TOKEN)
+if __name__ == "__main__":
 
-app = ApplicationBuilder().token(TOKEN).build()
+    print("🚀 Iniciando bot...")
 
-app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("liberar", liberar))
-app.add_handler(CommandHandler("verificar", verificar))
-app.add_handler(CommandHandler("menu", menu))
-app.add_handler(CommandHandler("admin", admin))
-app.add_handler(CallbackQueryHandler(botoes))
+    if not TOKEN:
+        raise ValueError("❌ TELEGRAM_TOKEN não encontrado nas variáveis de ambiente!")
 
-app.run_polling(drop_pending_updates=True)
+    print("✅ Token carregado com sucesso!")
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("liberar", liberar))
+    app.add_handler(CommandHandler("verificar", verificar))
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CallbackQueryHandler(botoes))
+
+    print("🤖 Bot rodando...")
+
+    app.run_polling(drop_pending_updates=True)
