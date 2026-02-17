@@ -228,3 +228,6 @@ if __name__ == "__main__":
     print("🤖 Bot rodando...")
 
     app.run_polling(drop_pending_updates=True)
+    if __name__ == "__main__":
+    app.run_polling(drop_pending_updates=True, close_loop=False)
+
