@@ -22,6 +22,22 @@ CREATE TABLE IF NOT EXISTS usuarios_pagos (
 
 conn.commit()
 
+async def verificar_acesso(update: Update):
+    user_id = update.effective_user.id
+
+    # Admin sempre tem acesso
+    if user_id == ADMIN_ID:
+        return True
+
+    if usuario_tem_acesso(user_id):
+        return True
+
+    await update.message.reply_text(
+        "🔒 Você ainda não tem acesso ao conteúdo.\n\n"
+        "Digite /start para adquirir acesso."
+    )
+
+    return False
 
 def salvar_usuario_pago(user_id):
     cursor.execute("INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)", (user_id,))
@@ -133,16 +149,15 @@ async def verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
 
-    if not usuario_tem_acesso(user_id):
-        await update.message.reply_text("❌ Você ainda não possui acesso ao sistema.")
+    if not await verificar_acesso(update):
         return
 
     await update.message.reply_text(
         "📚 Bem-vindo ao Sistema IA Lucrativa\n\n"
         "Em breve aqui estarão os módulos."
     )
+
 
 
 # ===== INICIAR BOT =====
