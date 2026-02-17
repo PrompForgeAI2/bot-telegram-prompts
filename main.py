@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -47,36 +48,23 @@ def usuario_tem_acesso(user_id):
 # === BLOQUEIO GLOBAL === #
 
 async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     if not update.message or not update.message.text:
         return
 
     user_id = update.effective_user.id
-
-    # Admin sempre liberado
     if user_id == ADMIN_ID:
         return
 
-    text = update.message.text
+    comando = update.message.text.split()[0].replace("/", "")
 
-    # pega o comando sem parâmetros
-    comando = text.split()[0].replace("/", "")
-
-    # comandos liberados
     if comando in COMANDOS_LIVRES:
         return
 
-    # bloqueia se não pagou
     if not usuario_tem_acesso(user_id):
         await update.message.reply_text(
-            "🔒 Este comando é exclusivo para membros.\n\n"
-            "Digite /start para adquirir acesso."
+            "🔒 Este comando é exclusivo para membros.\n\nDigite /start para adquirir acesso."
         )
-
-        # MUITO importante: interrompe outros handlers
         return True
-
-
 
 async def verificar_acesso(update: Update):
     user_id = update.effective_user.id
@@ -219,7 +207,9 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👥 Total pagos: {total}\n\n"
         f"📋 IDs:\n{lista_ids}"
     )
-
+async def post_init(app):
+    # garante que não existe webhook ativo e limpa updates pendentes
+    await app.bot.delete_webhook(drop_pending_updates=True)
 
 # === INICIAR BOT === #
 
@@ -232,7 +222,7 @@ if __name__ == "__main__":
 
     print("✅ Token carregado com sucesso!")
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(MessageHandler(filters.COMMAND, bloquear_nao_pagantes), group=0)
     app.add_handler(CommandHandler("start", start))
