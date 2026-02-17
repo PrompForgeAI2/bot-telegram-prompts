@@ -10,6 +10,8 @@ from telegram.ext import CallbackQueryHandler
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 ADMIN_ID = 5680777509  # coloque seu ID real aqui
 COMANDOS_LIVRES = ["start", "liberar", "verificar"]
+COMANDOS_LIVRES = ["start", "liberar", "verificar", "admin"]
+
 
 
 
@@ -22,6 +24,24 @@ CREATE TABLE IF NOT EXISTS usuarios_pagos (
     user_id INTEGER PRIMARY KEY
 )
 """)
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Você não tem permissão.")
+        return
+
+    cursor.execute("SELECT user_id FROM usuarios_pagos")
+    usuarios = cursor.fetchall()
+
+    total = len(usuarios)
+
+    lista_ids = "\n".join([str(user[0]) for user in usuarios]) if usuarios else "Nenhum usuário ainda."
+
+    await update.message.reply_text(
+        f"📊 PAINEL ADMIN\n\n"
+        f"👥 Total de usuários pagos: {total}\n\n"
+        f"📋 IDs cadastrados:\n{lista_ids}"
+    )
 
 conn.commit()
 async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,6 +221,8 @@ app.add_handler(CommandHandler("liberar", liberar))
 app.add_handler(CommandHandler("verificar", verificar))
 app.add_handler(CommandHandler("menu", menu))
 app.add_handler(CallbackQueryHandler(botoes))
+app.add_handler(CommandHandler("admin", admin))
+
 
 
 app.run_polling()
