@@ -48,25 +48,34 @@ def usuario_tem_acesso(user_id):
 
 async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update.message:
+    if not update.message or not update.message.text:
         return
 
     user_id = update.effective_user.id
 
+    # Admin sempre liberado
     if user_id == ADMIN_ID:
         return
 
-    if update.message.text and update.message.text.startswith("/"):
-        comando = update.message.text.split()[0].replace("/", "")
+    text = update.message.text
 
-        if comando in COMANDOS_LIVRES:
-            return
+    # pega o comando sem parâmetros
+    comando = text.split()[0].replace("/", "")
 
-        if not usuario_tem_acesso(user_id):
-            await update.message.reply_text(
-                "🔒 Este comando é exclusivo para membros.\n\n"
-                "Digite /start para adquirir acesso."
-            )
+    # comandos liberados
+    if comando in COMANDOS_LIVRES:
+        return
+
+    # bloqueia se não pagou
+    if not usuario_tem_acesso(user_id):
+        await update.message.reply_text(
+            "🔒 Este comando é exclusivo para membros.\n\n"
+            "Digite /start para adquirir acesso."
+        )
+
+        # MUITO importante: interrompe outros handlers
+        return True
+
 
 
 async def verificar_acesso(update: Update):
@@ -225,7 +234,7 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    #app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
+    app.add_handler(MessageHandler(filters.COMMAND, bloquear_nao_pagantes), group=0)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("liberar", liberar))
     app.add_handler(CommandHandler("verificar", verificar))
