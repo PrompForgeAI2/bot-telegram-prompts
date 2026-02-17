@@ -1,24 +1,24 @@
-import sqlite3
 import os
+import sqlite3
+from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     ContextTypes,
     CallbackQueryHandler,
-    MessageHandler,
-    filters,
 )
-from telegram.ext import ApplicationHandlerStop  # <-- para parar handlers corretamente
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = 5680777509  # seu ID
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # ex: https://xxxx.up.railway.app
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "changeme")
+
+ADMIN_ID = 5680777509
 COMANDOS_LIVRES = ["start", "liberar", "verificar", "admin"]
 
-# === BANCO DE DADOS === #
+# === DB ===
 conn = sqlite3.connect("usuarios.db", check_same_thread=False)
 cursor = conn.cursor()
-
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS usuarios_pagos (
     user_id INTEGER PRIMARY KEY
@@ -26,83 +26,24 @@ CREATE TABLE IF NOT EXISTS usuarios_pagos (
 """)
 conn.commit()
 
-
-# === FUNÇÕES DE BANCO === #
-
 def salvar_usuario_pago(user_id: int):
-    cursor.execute(
-        "INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)",
-        (user_id,)
-    )
+    cursor.execute("INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-
 def usuario_tem_acesso(user_id: int) -> bool:
-    cursor.execute(
-        "SELECT user_id FROM usuarios_pagos WHERE user_id = ?",
-        (user_id,)
-    )
+    cursor.execute("SELECT user_id FROM usuarios_pagos WHERE user_id = ?", (user_id,))
     return cursor.fetchone() is not None
 
 
-# === BLOQUEIO GLOBAL (SÓ COMANDOS) === #
-
-async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Só processa mensagens com texto
-    if not update.message or not update.message.text:
-        return
-
-    user_id = update.effective_user.id
-
-    # Admin sempre liberado
-    if user_id == ADMIN_ID:
-        return
-
-    # Comando (sem parâmetros)
-    comando = update.message.text.split()[0].replace("/", "")
-
-    # Comandos liberados
-    if comando in COMANDOS_LIVRES:
-        return
-
-    # Bloqueia se não pagou
-    if not usuario_tem_acesso(user_id):
-        await update.message.reply_text(
-            "🔒 Este comando é exclusivo para membros.\n\n"
-            "Digite /start para adquirir acesso."
-        )
-        # Interrompe o processamento de handlers seguintes
-        raise ApplicationHandlerStop
-
-
-async def verificar_acesso(update: Update) -> bool:
-    user_id = update.effective_user.id
-
-    if user_id == ADMIN_ID:
-        return True
-
-    if usuario_tem_acesso(user_id):
-        return True
-
-    await update.message.reply_text(
-        "🔒 Você ainda não tem acesso ao conteúdo.\n\n"
-        "Digite /start para adquirir acesso."
-    )
-    return False
-
-
-# === COMANDOS === #
-
+# === BOT HANDLERS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔓 Quero Acesso", callback_data="quero_acesso")]]
-
     await update.message.reply_text(
         "🚀 Sistema IA Lucrativa\n\n"
         "Aprenda a gerar renda usando Inteligência Artificial.\n\n"
         "Clique abaixo para desbloquear o acesso completo.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -115,7 +56,6 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📋 Copiar Chave Pix", callback_data="copiar_pix")],
             [InlineKeyboardButton("✅ Já Paguei", callback_data="ja_paguei")],
         ]
-
         await query.edit_message_text(
             "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
             "Valor: R$29,90\n\n"
@@ -131,7 +71,6 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data == "ja_paguei":
         user = query.from_user
-
         await context.bot.send_message(
             chat_id=ADMIN_ID,
             text=(
@@ -141,13 +80,11 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📎 Username: @{user.username if user.username else 'Não possui'}"
             ),
         )
-
         await query.edit_message_text(
             "📩 Recebemos sua solicitação!\n\n"
             "Seu pagamento será verificado.\n"
             "Assim que confirmado, você receberá acesso."
         )
-
 
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -161,9 +98,7 @@ async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = int(context.args[0])
         salvar_usuario_pago(user_id)
-
         await update.message.reply_text(f"✅ Usuário {user_id} liberado!")
-
         await context.bot.send_message(
             chat_id=user_id,
             text="🎉 Pagamento confirmado!\n\nUse /menu para acessar.",
@@ -171,74 +106,69 @@ async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("❌ ID inválido.")
 
-
 async def verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if usuario_tem_acesso(user_id):
+    if usuario_tem_acesso(update.effective_user.id):
         await update.message.reply_text("🔓 Você tem acesso.")
     else:
         await update.message.reply_text("❌ Você NÃO tem acesso.")
 
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await verificar_acesso(update):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID and not usuario_tem_acesso(user_id):
+        await update.message.reply_text("🔒 Acesso exclusivo.\n\nDigite /start para adquirir acesso.")
         return
-
-    await update.message.reply_text(
-        "📚 Bem-vindo ao Sistema IA Lucrativa\n\n"
-        "Em breve aqui estarão os módulos."
-    )
-
+    await update.message.reply_text("📚 Bem-vindo ao Sistema IA Lucrativa\n\nEm breve aqui estarão os módulos.")
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Você não tem permissão.")
         return
-
     cursor.execute("SELECT user_id FROM usuarios_pagos")
     usuarios = cursor.fetchall()
-
     total = len(usuarios)
     lista_ids = "\n".join([str(u[0]) for u in usuarios]) if usuarios else "Nenhum usuário ainda."
-
     await update.message.reply_text(
-        f"📊 PAINEL ADMIN\n\n"
-        f"👥 Total pagos: {total}\n\n"
-        f"📋 IDs:\n{lista_ids}"
+        f"📊 PAINEL ADMIN\n\n👥 Total pagos: {total}\n\n📋 IDs:\n{lista_ids}"
     )
 
 
-# === POST INIT (limpa webhook) === #
-async def post_init(app):
-    await app.bot.delete_webhook(drop_pending_updates=True)
+# === FASTAPI + APP ===
+api = FastAPI()
+ptb_app: Application = Application.builder().token(TOKEN).build()
 
-import uuid
-print("BOOT ID:", uuid.uuid4())
+ptb_app.add_handler(CommandHandler("start", start))
+ptb_app.add_handler(CommandHandler("liberar", liberar))
+ptb_app.add_handler(CommandHandler("verificar", verificar))
+ptb_app.add_handler(CommandHandler("menu", menu))
+ptb_app.add_handler(CommandHandler("admin", admin))
+ptb_app.add_handler(CallbackQueryHandler(botoes))
 
-# === INICIAR BOT === #
+@api.on_event("startup")
+async def on_startup():
+    if not TOKEN or not PUBLIC_URL:
+        raise RuntimeError("Configure TELEGRAM_TOKEN e PUBLIC_URL nas variáveis do Railway.")
 
-if __name__ == "__main__":
-    print("🚀 Iniciando bot...")
+    await ptb_app.initialize()
+    await ptb_app.start()
 
-    if not TOKEN:
-        raise ValueError("❌ TELEGRAM_TOKEN não encontrado!")
+    webhook_url = f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
+    await ptb_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
 
-    print("✅ Token carregado com sucesso!")
+@api.on_event("shutdown")
+async def on_shutdown():
+    await ptb_app.stop()
+    await ptb_app.shutdown()
 
-    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+@api.get("/")
+async def root():
+    return {"ok": True}
 
-    # bloqueio primeiro (group=0)
-    app.add_handler(MessageHandler(filters.COMMAND, bloquear_nao_pagantes), group=0)
+@api.post("/webhook/{secret}")
+async def telegram_webhook(secret: str, request: Request):
+    if secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
 
-    # comandos
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("liberar", liberar))
-    app.add_handler(CommandHandler("verificar", verificar))
-    app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(CommandHandler("admin", admin))
-
-    # callbacks
-    app.add_handler(CallbackQueryHandler(botoes))
-
-    print("🤖 Bot rodando...")
-    app.run_polling(drop_pending_updates=True)
+    data = await request.json()
+    update = Update.de_json(data, ptb_app.bot)
+    await ptb_app.process_update(update)
+    return {"ok": True}
