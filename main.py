@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
+    #app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("liberar", liberar))
     app.add_handler(CommandHandler("verificar", verificar))
