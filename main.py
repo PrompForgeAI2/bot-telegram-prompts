@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import Response
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -10,7 +11,7 @@ from telegram.ext import (
 )
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-PUBLIC_URL = os.getenv("PUBLIC_URL")  # ex: https://xxxx.up.railway.app
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # ex: https://xxxx.up.railway.app (SEM / no final)
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "changeme")
 
 ADMIN_ID = 5680777509
@@ -143,25 +144,54 @@ ptb_app.add_handler(CommandHandler("menu", menu))
 ptb_app.add_handler(CommandHandler("admin", admin))
 ptb_app.add_handler(CallbackQueryHandler(botoes))
 
+
 @api.on_event("startup")
 async def on_startup():
     if not TOKEN or not PUBLIC_URL:
         raise RuntimeError("Configure TELEGRAM_TOKEN e PUBLIC_URL nas variáveis do Railway.")
 
+    # normaliza URL (remove / final)
+    base = PUBLIC_URL.rstrip("/")
+    webhook_url = f"{base}/webhook/{WEBHOOK_SECRET}"
+
     await ptb_app.initialize()
     await ptb_app.start()
 
-    webhook_url = f"{PUBLIC_URL}/webhook/{WEBHOOK_SECRET}"
+    # limpa webhook antigo e seta o novo
+    await ptb_app.bot.delete_webhook(drop_pending_updates=True)
     await ptb_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+
 
 @api.on_event("shutdown")
 async def on_shutdown():
     await ptb_app.stop()
     await ptb_app.shutdown()
 
+
 @api.get("/")
 async def root():
     return {"ok": True}
+
+
+@api.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
+
+@api.get("/webhook-info")
+async def webhook_info():
+    # útil pra você checar se o Telegram gravou a URL do webhook
+    info = await ptb_app.bot.get_webhook_info()
+    return {
+        "url": info.url,
+        "has_custom_certificate": info.has_custom_certificate,
+        "pending_update_count": info.pending_update_count,
+        "last_error_date": info.last_error_date,
+        "last_error_message": info.last_error_message,
+        "max_connections": info.max_connections,
+        "ip_address": info.ip_address,
+    }
+
 
 @api.post("/webhook/{secret}")
 async def telegram_webhook(secret: str, request: Request):
@@ -169,6 +199,12 @@ async def telegram_webhook(secret: str, request: Request):
         raise HTTPException(status_code=403, detail="forbidden")
 
     data = await request.json()
-    update = Update.de_json(data, ptb_app.bot)
-    await ptb_app.process_update(update)
+
+    try:
+        update = Update.de_json(data, ptb_app.bot)
+        await ptb_app.process_update(update)
+    except Exception as e:
+        # não deixa o Telegram "re-tentar" por erro do seu app
+        return {"ok": False, "error": str(e)}
+
     return {"ok": True}
