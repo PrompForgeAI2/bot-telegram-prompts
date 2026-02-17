@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from telegram.ext import MessageHandler, filters
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -8,6 +9,8 @@ from telegram.ext import CallbackQueryHandler
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 ADMIN_ID = 5680777509  # coloque seu ID real aqui
+COMANDOS_LIVRES = ["start", "liberar", "verificar"]
+
 
 
 # === BANCO DE DADOS === #
@@ -21,6 +24,31 @@ CREATE TABLE IF NOT EXISTS usuarios_pagos (
 """)
 
 conn.commit()
+async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # Se não for mensagem de texto, ignora
+    if not update.message:
+        return
+
+    user_id = update.effective_user.id
+
+    # Admin sempre liberado
+    if user_id == ADMIN_ID:
+        return
+
+    # Pega o comando digitado
+    if update.message.text.startswith("/"):
+        comando = update.message.text.split()[0].replace("/", "")
+
+        if comando in COMANDOS_LIVRES:
+            return
+
+        if not usuario_tem_acesso(user_id):
+            await update.message.reply_text(
+                "🔒 Este comando é exclusivo para membros.\n\n"
+                "Digite /start para adquirir acesso."
+            )
+            return
 
 async def verificar_acesso(update: Update):
     user_id = update.effective_user.id
@@ -165,6 +193,8 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 print("🚀 Iniciando bot...")
 
 app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("liberar", liberar))
