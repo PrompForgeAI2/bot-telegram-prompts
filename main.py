@@ -2,6 +2,7 @@ import os
 import re
 import base64
 import sqlite3
+import time
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response
@@ -23,8 +24,14 @@ PUBLIC_URL = os.getenv("PUBLIC_URL")  # ex: https://xxxx.up.railway.app (SEM / n
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "changeme")
 
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN")  # obrigatório
+
 ADMIN_ID = 5680777509
 PRECO = 29.90
+
+# Anti-spam e expiração
+PAYMENT_TTL_SECONDS = 15 * 60     # 15 min: se não pagar, expira
+CREATE_COOLDOWN_SECONDS = 60      # 60s: impede gerar pagamento sem parar
+VERIFY_COOLDOWN_SECONDS = 10      # 10s: impede spam no "verificar"
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
@@ -52,42 +59,131 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     payment_id TEXT PRIMARY KEY,
     user_id INTEGER,
     status TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at INTEGER,
+    expires_at INTEGER
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    event TEXT,
+    detail TEXT,
+    ts INTEGER
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS rate_limits (
+    user_id INTEGER PRIMARY KEY,
+    last_create_ts INTEGER DEFAULT 0,
+    last_verify_ts INTEGER DEFAULT 0
 )
 """)
 
 conn.commit()
+
+
+def now_ts() -> int:
+    return int(time.time())
+
+
+def audit(user_id: int, event: str, detail: str = ""):
+    cursor.execute(
+        "INSERT INTO audit_log (user_id, event, detail, ts) VALUES (?, ?, ?, ?)",
+        (user_id, event, detail, now_ts()),
+    )
+    conn.commit()
+
 
 def get_email(user_id: int) -> str | None:
     cursor.execute("SELECT email FROM usuarios WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     return row[0] if row else None
 
+
 def set_email(user_id: int, email: str):
     cursor.execute("INSERT OR REPLACE INTO usuarios (user_id, email) VALUES (?, ?)", (user_id, email))
     conn.commit()
+    audit(user_id, "email_saved", email)
+
 
 def salvar_usuario_pago(user_id: int):
     cursor.execute("INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)", (user_id,))
     conn.commit()
+    audit(user_id, "access_granted", "usuario_pagos")
+
 
 def usuario_tem_acesso(user_id: int) -> bool:
     cursor.execute("SELECT user_id FROM usuarios_pagos WHERE user_id = ?", (user_id,))
     return cursor.fetchone() is not None
 
-def salvar_pagamento(user_id: int, payment_id: str, status: str):
+
+def salvar_pagamento(user_id: int, payment_id: str, status: str, created_at: int, expires_at: int):
     cursor.execute(
-        "INSERT OR REPLACE INTO pagamentos (payment_id, user_id, status) VALUES (?, ?, ?)",
-        (payment_id, user_id, status)
+        "INSERT OR REPLACE INTO pagamentos (payment_id, user_id, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+        (payment_id, user_id, status, created_at, expires_at),
     )
     conn.commit()
 
+
+def atualizar_status_pagamento(payment_id: str, status: str):
+    cursor.execute(
+        "UPDATE pagamentos SET status = ? WHERE payment_id = ?",
+        (status, payment_id),
+    )
+    conn.commit()
+
+
 def ultimo_pagamento_do_usuario(user_id: int):
     cursor.execute(
-        "SELECT payment_id, status FROM pagamentos WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-        (user_id,)
+        "SELECT payment_id, status, created_at, expires_at FROM pagamentos WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+        (user_id,),
     )
-    return cursor.fetchone()  # (payment_id, status) ou None
+    return cursor.fetchone()  # (payment_id, status, created_at, expires_at) ou None
+
+
+def ensure_rate_row(user_id: int):
+    cursor.execute("INSERT OR IGNORE INTO rate_limits (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+
+def can_create_payment(user_id: int) -> tuple[bool, int]:
+    ensure_rate_row(user_id)
+    cursor.execute("SELECT last_create_ts FROM rate_limits WHERE user_id = ?", (user_id,))
+    last = cursor.fetchone()[0] or 0
+    wait = (last + CREATE_COOLDOWN_SECONDS) - now_ts()
+    return (wait <= 0, max(0, wait))
+
+
+def mark_created(user_id: int):
+    ensure_rate_row(user_id)
+    cursor.execute("UPDATE rate_limits SET last_create_ts = ? WHERE user_id = ?", (now_ts(), user_id))
+    conn.commit()
+
+
+def can_verify(user_id: int) -> tuple[bool, int]:
+    ensure_rate_row(user_id)
+    cursor.execute("SELECT last_verify_ts FROM rate_limits WHERE user_id = ?", (user_id,))
+    last = cursor.fetchone()[0] or 0
+    wait = (last + VERIFY_COOLDOWN_SECONDS) - now_ts()
+    return (wait <= 0, max(0, wait))
+
+
+def mark_verified(user_id: int):
+    ensure_rate_row(user_id)
+    cursor.execute("UPDATE rate_limits SET last_verify_ts = ? WHERE user_id = ?", (now_ts(), user_id))
+    conn.commit()
+
+
+def pagamento_ativo_ainda(last_row) -> bool:
+    if not last_row:
+        return False
+    _pid, status, _created, expires_at = last_row
+    if status in ("approved", "rejected", "cancelled", "refunded", "charged_back"):
+        return False
+    return now_ts() < int(expires_at or 0)
 
 
 # ======================
@@ -106,7 +202,7 @@ async def criar_pagamento_pix(user_id: int, email: str):
         "payment_method_id": "pix",
         "external_reference": str(user_id),
         "payer": {"email": email},
-        "notification_url": f"{PUBLIC_URL.rstrip('/')}/mp-webhook"
+        "notification_url": f"{PUBLIC_URL.rstrip('/')}/mp-webhook",
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -116,13 +212,18 @@ async def criar_pagamento_pix(user_id: int, email: str):
 
     payment_id = str(data["id"])
     status = data.get("status", "pending")
-    salvar_pagamento(user_id, payment_id, status)
+
+    created_at = now_ts()
+    expires_at = created_at + PAYMENT_TTL_SECONDS
+    salvar_pagamento(user_id, payment_id, status, created_at, expires_at)
 
     tx = data.get("point_of_interaction", {}).get("transaction_data", {})
     copia_cola = tx.get("qr_code")
     qr_b64 = tx.get("qr_code_base64")
 
-    return payment_id, status, copia_cola, qr_b64
+    audit(user_id, "payment_created", f"id={payment_id} status={status}")
+
+    return payment_id, status, copia_cola, qr_b64, expires_at
 
 
 async def consultar_pagamento(payment_id: str):
@@ -136,13 +237,27 @@ async def consultar_pagamento(payment_id: str):
 
 
 # ======================
-# BOT HANDLERS
+# BOT + FASTAPI
 # ======================
 api = FastAPI()
 ptb_app: Application = Application.builder().token(TOKEN).build()
 
-# Guarda estado simples (quem está digitando email agora)
 AGUARDANDO_EMAIL: set[int] = set()
+
+
+def pagamento_texto(copia_cola: str, payment_id: str, expires_at: int) -> str:
+    restante = max(0, expires_at - now_ts())
+    mins = restante // 60
+    secs = restante % 60
+    return (
+        "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
+        f"Valor: R${PRECO:.2f}\n\n"
+        "✅ Pague via Pix copiando e colando:\n\n"
+        f"`{copia_cola}`\n\n"
+        f"🧾 ID do pagamento: `{payment_id}`\n"
+        f"⏳ Expira em: **{mins:02d}:{secs:02d}**\n\n"
+        "Depois de pagar, clique em **Verificar pagamento**."
+    )
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,24 +290,24 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Você não tem permissão.")
         return
 
-    cursor.execute("SELECT user_id, email FROM usuarios")
+    cursor.execute("SELECT user_id, email FROM usuarios ORDER BY user_id DESC LIMIT 200")
     todos = cursor.fetchall()
 
     cursor.execute("SELECT user_id FROM usuarios_pagos")
     pagos = set([r[0] for r in cursor.fetchall()])
 
     total_pagos = len(pagos)
+
     linhas = []
     for uid, em in todos:
         tag = "✅" if uid in pagos else "⏳"
         linhas.append(f"{tag} {uid} - {em or 'sem email'}")
 
-    texto = (
+    await update.message.reply_text(
         f"📊 PAINEL ADMIN\n\n"
         f"👥 Total pagos: {total_pagos}\n\n"
-        f"📋 Usuários:\n" + ("\n".join(linhas) if linhas else "Nenhum usuário ainda.")
+        f"📋 Usuários (últimos 200):\n" + ("\n".join(linhas) if linhas else "Nenhum usuário ainda.")
     )
-    await update.message.reply_text(texto)
 
 
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -218,7 +333,6 @@ async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def capturar_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Captura email somente quando o usuário estiver no estado AGUARDANDO_EMAIL."""
     if not update.message or not update.message.text:
         return
 
@@ -227,7 +341,6 @@ async def capturar_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     email = update.message.text.strip()
-
     if not EMAIL_RE.match(email):
         await update.message.reply_text("⚠️ Email inválido. Envie novamente (ex: nome@gmail.com).")
         return
@@ -235,7 +348,7 @@ async def capturar_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_email(user_id, email)
     AGUARDANDO_EMAIL.discard(user_id)
 
-    await update.message.reply_text("✅ Email salvo! Agora volte e clique em **Quero Acesso**.", parse_mode="Markdown")
+    await update.message.reply_text("✅ Email salvo! Agora clique em **Quero Acesso**.", parse_mode="Markdown")
 
 
 async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -244,38 +357,58 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
 
+    # ==========
+    # CRIAR / MOSTRAR PIX
+    # ==========
     if query.data == "quero_acesso":
-        # 1) Se não tiver email, pede email primeiro (sem gerar pix ainda)
+        if usuario_tem_acesso(user_id):
+            await query.message.reply_text("✅ Você já tem acesso. Use /menu.")
+            return
+
+        # 1) exigir email
         email = get_email(user_id)
         if not email:
             AGUARDANDO_EMAIL.add(user_id)
             await query.message.reply_text(
-                "📧 Antes de gerar o Pix, me envie seu **email** (o mesmo que você usa no Mercado Pago).\n\n"
+                "📧 Antes de gerar o Pix, me envie seu **email** (o mesmo do Mercado Pago).\n\n"
                 "Exemplo: `seunome@gmail.com`",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
             )
             return
 
-        # 2) Gera Pix
+        # 2) anti-spam criação
+        ok, wait = can_create_payment(user_id)
+        if not ok:
+            await query.message.reply_text(f"⏳ Aguarde {wait}s para gerar um novo Pix.")
+            return
+
+        # 3) se já existe um pagamento ativo recente, reaproveita (não cria outro)
+        last = ultimo_pagamento_do_usuario(user_id)
+        if pagamento_ativo_ainda(last):
+            pid, _status, _created, expires_at = last
+            await query.message.reply_text(
+                "ℹ️ Você já tem um Pix ativo. Use o mesmo e depois clique em **Verificar pagamento**.\n"
+                "Se expirou, aguarde e gere um novo.",
+                parse_mode="Markdown",
+            )
+            keyboard = [[InlineKeyboardButton("🔄 Verificar pagamento", callback_data="verificar_pagamento")]]
+            await query.message.reply_text(
+                f"🧾 Pagamento ativo: `{pid}`\n⏳ Expira em: {max(0, int(expires_at) - now_ts())//60} min",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+            return
+
+        # 4) cria novo pix
+        mark_created(user_id)
         await query.edit_message_text("⏳ Gerando seu Pix...")
 
-        payment_id, status, copia_cola, qr_b64 = await criar_pagamento_pix(user_id, email)
+        payment_id, status, copia_cola, qr_b64, expires_at = await criar_pagamento_pix(user_id, email)
 
-        keyboard = [
-            [InlineKeyboardButton("🔄 Verificar pagamento", callback_data="verificar_pagamento")],
-        ]
-
-        texto = (
-            "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
-            f"Valor: R${PRECO:.2f}\n\n"
-            "✅ Pague via Pix copiando e colando:\n\n"
-            f"`{copia_cola}`\n\n"
-            f"🧾 ID do pagamento: `{payment_id}`\n\n"
-            "Depois de pagar, clique em **Verificar pagamento**."
-        )
+        keyboard = [[InlineKeyboardButton("🔄 Verificar pagamento", callback_data="verificar_pagamento")]]
 
         await query.edit_message_text(
-            texto,
+            pagamento_texto(copia_cola, payment_id, expires_at),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
         )
@@ -284,18 +417,39 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             img_bytes = base64.b64decode(qr_b64)
             await context.bot.send_photo(chat_id=user_id, photo=img_bytes, caption="📌 QR Code Pix")
 
+    # ==========
+    # VERIFICAR STATUS
+    # ==========
     elif query.data == "verificar_pagamento":
-        last = ultimo_pagamento_do_usuario(user_id)
-
-        if not last:
-            await query.message.reply_text("⚠️ Nenhum pagamento encontrado. Clique em **Quero Acesso** novamente.", parse_mode="Markdown")
+        if usuario_tem_acesso(user_id):
+            await query.message.reply_text("✅ Você já tem acesso. Use /menu.")
             return
 
-        payment_id, _ = last
+        ok, wait = can_verify(user_id)
+        if not ok:
+            await query.message.reply_text(f"⏳ Aguarde {wait}s para verificar novamente.")
+            return
+        mark_verified(user_id)
+
+        last = ultimo_pagamento_do_usuario(user_id)
+        if not last:
+            await query.message.reply_text("⚠️ Nenhum pagamento encontrado. Clique em **Quero Acesso**.", parse_mode="Markdown")
+            return
+
+        payment_id, status_db, created_at, expires_at = last
+
+        # expirado localmente
+        if now_ts() >= int(expires_at):
+            atualizar_status_pagamento(payment_id, "expired")
+            audit(user_id, "payment_expired", f"id={payment_id}")
+            await query.message.reply_text("⌛ Seu Pix expirou. Clique em **Quero Acesso** para gerar outro.", parse_mode="Markdown")
+            return
+
+        # consulta MP
         info = await consultar_pagamento(payment_id)
         status = info.get("status", "unknown")
-
-        salvar_pagamento(user_id, payment_id, status)
+        atualizar_status_pagamento(payment_id, status)
+        audit(user_id, "payment_checked", f"id={payment_id} status={status}")
 
         if status == "approved":
             salvar_usuario_pago(user_id)
@@ -369,7 +523,11 @@ async def telegram_webhook(secret: str, request: Request):
 
 @api.post("/mp-webhook")
 async def mp_webhook(request: Request):
-    """Webhook do Mercado Pago: quando aprovar, libera automaticamente."""
+    """
+    Webhook Mercado Pago:
+    - consulta o pagamento real
+    - se approved: libera automaticamente
+    """
     data = await request.json()
 
     payment_id = None
@@ -393,7 +551,9 @@ async def mp_webhook(request: Request):
         user_id = 0
 
     if user_id:
-        salvar_pagamento(user_id, str(payment_id), status)
+        # atualiza status se existir registro
+        atualizar_status_pagamento(str(payment_id), status)
+        audit(user_id, "mp_webhook", f"id={payment_id} status={status}")
 
     if status == "approved" and user_id:
         salvar_usuario_pago(user_id)
