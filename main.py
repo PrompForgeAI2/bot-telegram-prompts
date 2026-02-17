@@ -212,6 +212,8 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app):
     await app.bot.delete_webhook(drop_pending_updates=True)
 
+import uuid
+print("BOOT ID:", uuid.uuid4())
 
 # === INICIAR BOT === #
 
