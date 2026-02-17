@@ -1,19 +1,18 @@
 import sqlite3
 import os
-from telegram.ext import MessageHandler, filters
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
-
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = 5680777509  # coloque seu ID real aqui
-COMANDOS_LIVRES = ["start", "liberar", "verificar"]
+ADMIN_ID = 5680777509  # seu ID
 COMANDOS_LIVRES = ["start", "liberar", "verificar", "admin"]
-
-
-
 
 # === BANCO DE DADOS === #
 conn = sqlite3.connect("usuarios.db", check_same_thread=False)
@@ -24,40 +23,34 @@ CREATE TABLE IF NOT EXISTS usuarios_pagos (
     user_id INTEGER PRIMARY KEY
 )
 """)
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Você não tem permissão.")
-        return
-
-    cursor.execute("SELECT user_id FROM usuarios_pagos")
-    usuarios = cursor.fetchall()
-
-    total = len(usuarios)
-
-    lista_ids = "\n".join([str(user[0]) for user in usuarios]) if usuarios else "Nenhum usuário ainda."
-
-    await update.message.reply_text(
-        f"📊 PAINEL ADMIN\n\n"
-        f"👥 Total de usuários pagos: {total}\n\n"
-        f"📋 IDs cadastrados:\n{lista_ids}"
-    )
-
 conn.commit()
+
+
+# === FUNÇÕES DE BANCO === #
+
+def salvar_usuario_pago(user_id):
+    cursor.execute("INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+
+def usuario_tem_acesso(user_id):
+    cursor.execute("SELECT user_id FROM usuarios_pagos WHERE user_id = ?", (user_id,))
+    return cursor.fetchone() is not None
+
+
+# === BLOQUEIO GLOBAL === #
+
 async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    # Se não for mensagem de texto, ignora
     if not update.message:
         return
 
     user_id = update.effective_user.id
 
-    # Admin sempre liberado
     if user_id == ADMIN_ID:
         return
 
-    # Pega o comando digitado
-    if update.message.text.startswith("/"):
+    if update.message.text and update.message.text.startswith("/"):
         comando = update.message.text.split()[0].replace("/", "")
 
         if comando in COMANDOS_LIVRES:
@@ -68,12 +61,11 @@ async def bloquear_nao_pagantes(update: Update, context: ContextTypes.DEFAULT_TY
                 "🔒 Este comando é exclusivo para membros.\n\n"
                 "Digite /start para adquirir acesso."
             )
-            return
+
 
 async def verificar_acesso(update: Update):
     user_id = update.effective_user.id
 
-    # Admin sempre tem acesso
     if user_id == ADMIN_ID:
         return True
 
@@ -87,32 +79,22 @@ async def verificar_acesso(update: Update):
 
     return False
 
-def salvar_usuario_pago(user_id):
-    cursor.execute("INSERT OR IGNORE INTO usuarios_pagos (user_id) VALUES (?)", (user_id,))
-    conn.commit()
 
-
-def usuario_tem_acesso(user_id):
-    cursor.execute("SELECT user_id FROM usuarios_pagos WHERE user_id = ?", (user_id,))
-    resultado = cursor.fetchone()
-    return resultado is not None
-
-
-# ===== FUNÇÕES =====
+# === COMANDOS === #
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🔓 Quero Acesso", callback_data="quero_acesso")]
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
         "🚀 Sistema IA Lucrativa\n\n"
         "Aprenda a gerar renda usando Inteligência Artificial.\n\n"
         "Clique abaixo para desbloquear o acesso completo.",
-        reply_markup=reply_markup
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+
 async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -125,13 +107,11 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✅ Já Paguei", callback_data="ja_paguei")]
         ]
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
         await query.edit_message_text(
             "💎 Acesso Completo ao Sistema IA Lucrativa\n\n"
             "Valor: R$29,90\n\n"
             "Clique abaixo para copiar sua chave Pix:",
-            reply_markup=reply_markup
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     elif query.data == "copiar_pix":
@@ -159,14 +139,13 @@ async def botoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Assim que confirmado, você receberá acesso."
         )
 
+
 async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    # Verifica se é o admin
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Você não tem permissão para usar este comando.")
+        await update.message.reply_text("❌ Você não tem permissão.")
         return
 
-    # Verifica se foi enviado um ID
     if not context.args:
         await update.message.reply_text("⚠️ Use assim:\n/liberar ID_DO_USUARIO")
         return
@@ -175,21 +154,20 @@ async def liberar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(context.args[0])
         salvar_usuario_pago(user_id)
 
-        await update.message.reply_text(f"✅ Usuário {user_id} liberado com sucesso!")
+        await update.message.reply_text(f"✅ Usuário {user_id} liberado!")
 
-        # Notifica o usuário liberado
         await context.bot.send_message(
             chat_id=user_id,
-            text="🎉 Seu pagamento foi confirmado!\n\nAgora você já pode acessar o sistema usando /menu"
+            text="🎉 Pagamento confirmado!\n\nUse /menu para acessar."
         )
 
     except:
         await update.message.reply_text("❌ ID inválido.")
 
 
-
 async def verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user_id = update.effective_user.id
+
     if usuario_tem_acesso(user_id):
         await update.message.reply_text("🔓 Você tem acesso.")
     else:
@@ -207,23 +185,38 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-# ===== INICIAR BOT =====
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Você não tem permissão.")
+        return
+
+    cursor.execute("SELECT user_id FROM usuarios_pagos")
+    usuarios = cursor.fetchall()
+
+    total = len(usuarios)
+    lista_ids = "\n".join([str(u[0]) for u in usuarios]) if usuarios else "Nenhum usuário ainda."
+
+    await update.message.reply_text(
+        f"📊 PAINEL ADMIN\n\n"
+        f"👥 Total pagos: {total}\n\n"
+        f"📋 IDs:\n{lista_ids}"
+    )
+
+
+# === INICIAR BOT === #
 
 print("🚀 Iniciando bot...")
-
 print("TOKEN carregado:", TOKEN)
+
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(MessageHandler(filters.ALL, bloquear_nao_pagantes), group=0)
-
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("liberar", liberar))
 app.add_handler(CommandHandler("verificar", verificar))
 app.add_handler(CommandHandler("menu", menu))
-app.add_handler(CallbackQueryHandler(botoes))
 app.add_handler(CommandHandler("admin", admin))
+app.add_handler(CallbackQueryHandler(botoes))
 
-
-
-app.run_polling()
+app.run_polling(drop_pending_updates=True)
